@@ -17,7 +17,9 @@ def settings(tmp_path):
 
 @pytest.fixture
 def store(settings):
-    return SQLiteStore(settings.data_dir / "index.sqlite3")
+    store = SQLiteStore(settings.data_dir / "index.sqlite3")
+    yield store
+    store.close()
 
 
 @pytest.fixture

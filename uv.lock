@@ -387,16 +387,19 @@ source = { editable = "." }
 dependencies = [
     { name = "fastembed" },
     { name = "httpx" },
+    { name = "huggingface-hub" },
     { name = "jieba" },
     { name = "mcp", extra = ["cli"] },
     { name = "nltk" },
     { name = "numpy" },
+    { name = "onnxruntime" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "rank-bm25" },
     { name = "rapidfuzz" },
+    { name = "tokenizers" },
     { name = "trafilatura" },
 ]
 
@@ -412,16 +415,19 @@ dev = [
 requires-dist = [
     { name = "fastembed", specifier = ">=0.9.1" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "huggingface-hub", specifier = ">=1.33.0" },
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.20,<2" },
     { name = "nltk", specifier = ">=3.10.4" },
     { name = "numpy", specifier = ">=2.5.4" },
+    { name = "onnxruntime", specifier = ">=1.31.1" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pydantic-settings", specifier = ">=2.16.2" },
     { name = "pypdf", specifier = ">=7.0.1" },
     { name = "python-docx", specifier = ">=1.2.0" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
+    { name = "tokenizers", specifier = ">=0.23.3" },
     { name = "trafilatura", specifier = ">=2.3.1" },
 ]
 

@@ -25,6 +25,26 @@ def main() -> None:
         "eval", help="Run the labeled retrieval and verification benchmark"
     )
     evaluate.add_argument("--dataset", help="Path to an evaluation JSON manifest")
+    evaluate.add_argument(
+        "--judge",
+        action="append",
+        choices=["rules", "nli"],
+        dest="judges",
+        help="Claim judge to evaluate; repeat for several (default: rules and nli)",
+    )
+    public = commands.add_parser(
+        "eval-public", help="Benchmark retrieval and claim checks on SciFact (downloads ~6 MB)"
+    )
+    public.add_argument("--limit", type=int, help="Use only the first N queries and claim pairs")
+    public.add_argument("--skip-retrieval", action="store_true")
+    public.add_argument("--skip-claims", action="store_true")
+    public.add_argument(
+        "--judge",
+        action="append",
+        choices=["rules", "nli"],
+        dest="judges",
+        help="Claim judge to evaluate; repeat for several (default: rules and nli)",
+    )
     args = parser.parse_args()
     settings = Settings()
 
@@ -36,7 +56,20 @@ def main() -> None:
     if args.command == "eval":
         from .evaluation import run_evaluation
 
-        run_evaluation(settings, args.dataset)
+        run_evaluation(settings, args.dataset, args.judges)
+        return
+    if args.command == "eval-public":
+        from .public_eval import run_public_evaluation
+
+        if args.limit is not None and args.limit < 1:
+            parser.error("--limit must be positive")
+        run_public_evaluation(
+            settings,
+            retrieval=not args.skip_retrieval,
+            claims=not args.skip_claims,
+            judges=args.judges,
+            limit=args.limit,
+        )
         return
 
     from .ingest.index import Indexer, collect_paths

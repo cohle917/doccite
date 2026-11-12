@@ -101,10 +101,12 @@ class Evidence(Chunk):
 
 class ClaimResult(BaseModel):
     verdict: Verdict
-    confidence: float = Field(ge=0, le=1, description="Heuristic or client-reported score")
+    confidence: float = Field(
+        ge=0, le=1, description="Heuristic score, NLI probability, or client-reported score"
+    )
     evidence: list[Evidence] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
-    judged_by: Literal["heuristic", "sampling"] = "heuristic"
+    judged_by: Literal["heuristic", "nli", "sampling"] = "heuristic"
 
 
 class CitationCheck(BaseModel):

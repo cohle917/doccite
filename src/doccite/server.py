@@ -1,5 +1,5 @@
 from asyncio import to_thread
-from typing import Annotated
+from typing import Annotated, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
@@ -24,6 +24,7 @@ from .store.sqlite_store import SQLiteStore
 from .verify.citations import verify_citations as check_citations
 from .verify.claim import verify_claim as check_claim
 from .verify.judge import sample_judgment
+from .verify.nli import NLIModel, OnnxNLI
 from .verify.quote import verify_quote as check_quote
 
 
@@ -34,8 +35,10 @@ def create_server(
     reranker: Reranker | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
+    nli: NLIModel | None = None,
 ) -> FastMCP:
     settings = settings or Settings()
+    nli_model = nli or OnnxNLI(settings)  # Loads on first use.
     store = SQLiteStore(settings.data_dir / "index.sqlite3")
     indexer = Indexer(store, settings)
     retriever = Retriever(
@@ -101,13 +104,27 @@ def create_server(
         """Compare an alleged quote with indexed text and show differences and location."""
         return await to_thread(check_quote, store, quote, doc_id, settings.quote_threshold)
 
+    def judge_model(judge: str) -> NLIModel | None:
+        return nli_model if judge == "nli" else None
+
     @server.tool()
     async def verify_claim(
-        claim: str, ctx: Context, doc_id: str | None = None, use_llm_judge: bool = False
+        claim: str,
+        ctx: Context,
+        doc_id: str | None = None,
+        judge: Literal["rules", "nli", "llm"] | None = None,
     ) -> ClaimResult:
-        """Check a claim against evidence sentences. Optionally ask the MCP client to judge."""
-        result = await to_thread(check_claim, retriever, settings, claim, doc_id)
-        return await sample_judgment(ctx, claim, result) if use_llm_judge else result
+        """Check a claim against evidence sentences.
+
+        judge: "rules" uses wording, number, negation and entity checks; "nli" adds a local
+        entailment model that can recognize paraphrases and return CONTRADICTED; "llm" asks the
+        MCP client's model through sampling. Defaults to the server setting.
+        """
+        judge = judge or settings.claim_judge
+        result = await to_thread(
+            check_claim, retriever, settings, claim, doc_id, nli=judge_model(judge)
+        )
+        return await sample_judgment(ctx, claim, result) if judge == "llm" else result
 
     @server.tool()
     async def verify_citations(text: str, sources: dict[str, str] | None = None) -> CitationReport:
@@ -115,7 +132,8 @@ def create_server(
         return await to_thread(check_citations, store, verify_cited_claim, text, sources)
 
     def verify_cited_claim(claim: str, doc_id: str | None, page: int | None) -> ClaimResult:
-        return check_claim(retriever, settings, claim, doc_id, page=page)
+        nli = judge_model(settings.claim_judge)
+        return check_claim(retriever, settings, claim, doc_id, page=page, nli=nli)
 
     @server.resource("doccite://documents/{doc_id}", mime_type="text/plain")
     async def document_resource(doc_id: str) -> str:

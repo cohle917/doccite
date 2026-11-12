@@ -1,4 +1,5 @@
 import re
+import warnings
 from collections import Counter
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -7,11 +8,17 @@ from math import exp
 import jieba
 import numpy as np
 
+with warnings.catch_warnings():
+    # jieba.posseg has regex escapes that newer Pythons warn about when compiling it.
+    warnings.simplefilter("ignore", SyntaxWarning)
+    from jieba import posseg
+
 from ..config import Settings
 from ..ingest.chunker import sentence_spans
 from ..models import ClaimResult, Evidence, Location, Verdict
 from ..retrieval.hybrid import Retriever, cosine_scores
 from ..retrieval.tokenize import tokenize
+from .nli import NLIModel
 from .normalize import normalize
 
 _NUMBER = re.compile(r"(?<![\d.])([+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)(\s*%)?")
@@ -35,6 +42,14 @@ _QUALIFIER = re.compile(
     re.IGNORECASE,
 )
 _SURFACE = re.compile(r"[^\W_]+|[%+<>≤≥-]")
+_SENTENCE_BREAK = re.compile(r"[.!?;:。！？；：]\s*")
+_LATIN_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+# jieba tags for person, place, organization, and other proper names.
+_NAME_FLAGS = frozenset({"nr", "nrfg", "nrt", "ns", "nt", "nz"})
+_NUMBERS_ISSUE = "Numbers, dates, or percentages in the claim are missing from the evidence"
+_QUALIFIER_ISSUE = "A condition, limit, or uncertainty differs between the claim and the evidence."
+# Rule findings that an NLI entailment cannot override; the model tends to miss them.
+_BLOCKS_SUPPORT = (_NUMBERS_ISSUE, _QUALIFIER_ISSUE, "Names in the claim")
 
 
 def _units(text: str) -> str:
@@ -78,21 +93,40 @@ def _excerpt(claim: str, text: str) -> bool:
     return False
 
 
+def _names(text: str) -> set[str]:
+    """Proper names and codes: Harbor, BRCA1, IL-6, 青岚. Sentence-initial plain words are skipped."""
+    names = set()
+    for sentence in _SENTENCE_BREAK.split(text):
+        for index, word in enumerate(_LATIN_WORD.findall(sentence)):
+            capitals = sum(char.isupper() for char in word)
+            code = any(char.isdigit() for char in word) and any(char.isalpha() for char in word)
+            if code or capitals > 1 or (capitals and index > 0):
+                names.add(word.casefold())
+    for run in _CJK.findall(text):
+        names.update(
+            pair.word for pair in posseg.cut(run) if pair.flag in _NAME_FLAGS and len(pair.word) > 1
+        )
+    return names
+
+
+def _missing_names(claim: str, evidence: Evidence) -> list[str]:
+    # Names may come from the document title, as in 青岚 for a sentence in 青岚水厂试点.
+    context = _units(f"{evidence.location.title} {evidence.text}").casefold()
+    return sorted(name for name in _names(_units(claim)) if name not in context)
+
+
 def _issues(claim: str, text: str) -> list[str]:
     issues = []
     expected, actual = _numbers(claim), _numbers(text)
     if missing := expected - actual:
         issues.append(
-            "Numbers, dates, or percentages in the claim are missing from the evidence: "
-            f"{', '.join(missing.elements())}. "
+            f"{_NUMBERS_ISSUE}: {', '.join(missing.elements())}. "
             f"Evidence has: {', '.join(actual.elements()) or '(none)'}."
         )
     if _negated(claim) != _negated(text):
         issues.append("Negation differs between the claim and the evidence.")
     if set(_QUALIFIER.findall(claim.casefold())) != set(_QUALIFIER.findall(text.casefold())):
-        issues.append(
-            "A condition, limit, or uncertainty differs between the claim and the evidence."
-        )
+        issues.append(_QUALIFIER_ISSUE)
     missing_words = Counter(tokenize(_units(claim))) - Counter(tokenize(_units(text)))
     missing_terms = [
         word for word in missing_words.elements() if not any(char.isdigit() for char in word)
@@ -126,7 +160,9 @@ def verify_claim(
     doc_id: str | None = None,
     *,
     page: int | None = None,
+    nli: NLIModel | None = None,
 ) -> ClaimResult:
+    """Score evidence sentences with lexical rules; with ``nli``, let the NLI model decide."""
     terms = tokenize(_units(claim))
     if not terms:
         return ClaimResult(verdict=Verdict.NOT_FOUND, confidence=0)
@@ -177,12 +213,93 @@ def verify_claim(
         elif score >= settings.claim_partial_threshold and coverage > 0:
             verdict = Verdict.PARTIALLY_SUPPORTED
         ranked.append((verdict, Evidence(text=text, location=location, score=score), issues))
+    in_order = list(ranked)  # Document order, before ranking.
+    by_score = sorted(ranked, key=lambda item: -item[1].score)
     priority = {Verdict.SUPPORTED: 2, Verdict.PARTIALLY_SUPPORTED: 1, Verdict.NOT_FOUND: 0}
     ranked.sort(key=lambda item: (priority[item[0]], item[1].score, -len(item[2])), reverse=True)
     verdict, best, issues = ranked[0]
-    return ClaimResult(
+    result = ClaimResult(
         verdict=verdict,
         confidence=best.score,
         evidence=[item[1] for item in ranked[:3]],
         issues=issues,
+    )
+    if nli is None:
+        return result
+    top = by_score[: settings.nli_candidates]
+    premises = top + _windows(claim, in_order, {id(item) for item in top})
+    return _judge_with_nli(nli, settings, claim, premises, result)
+
+
+def _windows(
+    claim: str, in_order: list[tuple[Verdict, Evidence, list[str]]], selected: set[int]
+) -> list[tuple[Verdict, Evidence, list[str]]]:
+    """Join each selected sentence with its neighbor, since evidence often spans two sentences.
+
+    On 250 SciFact train pairs, adding these windows raised NLI macro-F1 from 0.43 to 0.48
+    without adding false SUPPORT verdicts at the default threshold.
+    """
+    windows = []
+    for first, second in zip(in_order, in_order[1:], strict=False):
+        a, b = first[1], second[1]
+        adjacent = a.location.doc_id == b.location.doc_id and a.location.end <= b.location.start
+        if adjacent and (id(first) in selected or id(second) in selected):
+            text = f"{a.text} {b.text}"
+            location = a.location.model_copy(update={"end": b.location.end})
+            evidence = Evidence(text=text, location=location, score=max(a.score, b.score))
+            windows.append((Verdict.NOT_FOUND, evidence, _issues(claim, text)))
+    return windows
+
+
+def _judge_with_nli(
+    nli: NLIModel,
+    settings: Settings,
+    claim: str,
+    candidates: list[tuple[Verdict, Evidence, list[str]]],
+    rules: ClaimResult,
+) -> ClaimResult:
+    """Decide with entailment probabilities over the best rule-ranked evidence sentences."""
+    probabilities = nli.predict([(evidence.text, claim) for _, evidence, _ in candidates])
+    if probabilities is None:
+        rules.issues.append("NLI model unavailable. Used rule-based verification.")
+        return rules
+    entail = max(range(len(candidates)), key=lambda i: probabilities[i]["entailment"])
+    contra = max(range(len(candidates)), key=lambda i: probabilities[i]["contradiction"])
+    p_entail = probabilities[entail]["entailment"]
+    p_contra = probabilities[contra]["contradiction"]
+
+    if p_contra >= settings.nli_contradict_threshold and p_contra > p_entail:
+        lead, verdict, confidence = contra, Verdict.CONTRADICTED, p_contra
+        issues = [*candidates[lead][2], f"NLI contradiction probability {p_contra:.2f}."]
+    elif rules.verdict == Verdict.SUPPORTED:
+        # Matching wording is stronger evidence than the model; keep the rule verdict.
+        return rules.model_copy(update={"judged_by": "nli"})
+    elif p_entail >= settings.nli_entail_threshold:
+        # The model often accepts a changed figure, a dropped "up to", or a swapped name, so
+        # support needs an entailing sentence without those rule findings.
+        blocking = {}
+        for i, (_, evidence, found) in enumerate(candidates):
+            if probabilities[i]["entailment"] >= settings.nli_entail_threshold:
+                names = _missing_names(claim, evidence)
+                if names:
+                    found = [
+                        *found,
+                        f"Names in the claim are missing from the evidence: {', '.join(names)}.",
+                    ]
+                blocking[i] = [issue for issue in found if issue.startswith(_BLOCKS_SUPPORT)]
+        clean = [i for i, found in blocking.items() if not found]
+        lead = max(clean or blocking, key=lambda i: probabilities[i]["entailment"])
+        confidence = probabilities[lead]["entailment"]
+        verdict = Verdict.SUPPORTED if clean else Verdict.PARTIALLY_SUPPORTED
+        issues = [*blocking[lead], f"NLI entailment probability {confidence:.2f}."]
+    else:
+        lead = entail
+        verdict = rules.verdict
+        confidence = probabilities[lead]["neutral"]
+        issues = [*rules.issues, "NLI found no sentence that entails or contradicts the claim."]
+    evidence = [candidates[lead][1]] + [item[1] for i, item in enumerate(candidates) if i != lead][
+        :2
+    ]
+    return ClaimResult(
+        verdict=verdict, confidence=confidence, evidence=evidence, issues=issues, judged_by="nli"
     )

@@ -80,7 +80,7 @@ async def test_end_to_end_tools_resources_prompts_and_progress(settings, pdf_pat
             {
                 "claim": "The pilot reduced operating costs by 21%.",
                 "doc_id": doc_id,
-                "use_llm_judge": True,
+                "judge": "llm",
             },
         )
         assert claim["verdict"] == "PARTIALLY_SUPPORTED"
@@ -159,7 +159,7 @@ async def test_sampling_verdict_uses_client_result(settings, indexer, pdf_path):
             {
                 "claim": "The pilot reduced operating costs by 21%.",
                 "doc_id": doc.doc_id,
-                "use_llm_judge": True,
+                "judge": "llm",
             },
         )
         assert checked["verdict"] == "CONTRADICTED"

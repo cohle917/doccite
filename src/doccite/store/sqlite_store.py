@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
@@ -36,7 +37,11 @@ CREATE TABLE IF NOT EXISTS embeddings (
     vector BLOB NOT NULL,
     PRIMARY KEY (chunk_id, model)
 );
+-- Incremented whenever documents or chunks change; retrieval caches key on it.
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+INSERT OR IGNORE INTO meta VALUES ('generation', 0);
 """
+_BUMP = "UPDATE meta SET value=value+1 WHERE key='generation'"
 _INFO = "doc_id, title, source, format, chunk_count, page_count"
 _CHUNKS = "SELECT c.*, d.title FROM chunks c JOIN documents d USING (doc_id)"
 
@@ -55,6 +60,9 @@ def _chunk(row: sqlite3.Row) -> Chunk:
 class SQLiteStore:
     def __init__(self, path: Path):
         self.path = path
+        self._local = threading.local()
+        self._lock = threading.Lock()
+        self._connections: list[sqlite3.Connection] = []
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
@@ -62,14 +70,29 @@ class SQLiteStore:
 
     @contextmanager
     def connect(self):
-        db = sqlite3.connect(self.path, timeout=15)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        try:
-            with db:
-                yield db
-        finally:
-            db.close()
+        """Run one transaction on this thread's connection, committing on success."""
+        # Opening a connection costs tens of milliseconds on a large file (and more under
+        # Windows antivirus), so each thread keeps one open for the life of the store.
+        db = getattr(self._local, "db", None)
+        if db is None:
+            db = sqlite3.connect(self.path, timeout=15, check_same_thread=False)
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA foreign_keys=ON")
+            # With WAL, NORMAL skips an fsync per commit but keeps the database consistent.
+            db.execute("PRAGMA synchronous=NORMAL")
+            self._local.db = db
+            with self._lock:
+                self._connections.append(db)
+        with db:
+            yield db
+
+    def close(self) -> None:
+        """Close every connection this store opened (for tests and shutdown)."""
+        with self._lock:
+            for db in self._connections:
+                db.close()
+            self._connections.clear()
+        self._local = threading.local()
 
     def unchanged(self, source: str, revision: str) -> DocumentInfo | None:
         with self.connect() as db:
@@ -126,7 +149,12 @@ class SQLiteStore:
                     for ordinal, passage in enumerate(passages)
                 ),
             )
+            db.execute(_BUMP)
         return info, True
+
+    def generation(self) -> int:
+        with self.connect() as db:
+            return db.execute("SELECT value FROM meta WHERE key='generation'").fetchone()[0]
 
     def list_documents(self) -> list[DocumentInfo]:
         with self.connect() as db:
@@ -171,7 +199,10 @@ class SQLiteStore:
 
     def remove(self, doc_id: str) -> bool:
         with self.connect() as db:
-            return db.execute("DELETE FROM documents WHERE doc_id=?", (doc_id,)).rowcount == 1
+            removed = db.execute("DELETE FROM documents WHERE doc_id=?", (doc_id,)).rowcount == 1
+            if removed:
+                db.execute(_BUMP)
+            return removed
 
     def chunks(self, doc_ids: list[str] | None = None, page: int | None = None) -> list[Chunk]:
         query = (

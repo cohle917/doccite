@@ -12,6 +12,7 @@ from .retrieval.embedder import FastEmbedder, FastReranker
 from .retrieval.hybrid import Retriever
 from .store.sqlite_store import SQLiteStore
 from .verify.claim import verify_claim
+from .verify.nli import OnnxNLI
 
 
 class PassageLabel(BaseModel):
@@ -69,7 +70,9 @@ def _score_retrieval(
     return recall / len(cases), reciprocal_rank / len(cases)
 
 
-def run_evaluation(settings: Settings, dataset_path: str | None = None) -> None:
+def run_evaluation(
+    settings: Settings, dataset_path: str | None = None, judges: list[str] | None = None
+) -> None:
     manifest = Path(dataset_path or "eval/dataset.json").resolve()
     if not manifest.is_file():
         raise SystemExit(f"Evaluation manifest not found: {manifest}. Pass --dataset PATH.")
@@ -105,17 +108,41 @@ def run_evaluation(settings: Settings, dataset_path: str | None = None) -> None:
         else:
             print(f"{label:<18} {scores[0]:>8.3f} {scores[1]:>8.3f}")
 
+    nli = OnnxNLI(settings)
+    for judge in judges or ["rules", "nli"]:
+        print(f"\nClaim judge: {judge}")
+        _score_claims(retriever, settings, dataset.claims, ids, nli if judge == "nli" else None)
+
+
+def _correct(expected: Verdict, predicted: Verdict) -> bool:
+    # A contradiction is a stronger form of "the evidence disagrees", so it also counts for
+    # cases labeled PARTIALLY_SUPPORTED (tampered numbers, flipped negation, swapped entities).
+    return predicted == expected or (
+        expected == Verdict.PARTIALLY_SUPPORTED and predicted == Verdict.CONTRADICTED
+    )
+
+
+def _score_claims(
+    retriever: Retriever,
+    settings: Settings,
+    cases: list[ClaimCase],
+    ids: dict[str, str],
+    nli: OnnxNLI | None,
+) -> None:
     matrix = Counter()
     by_category: dict[str, list[int]] = {}
-    for case in dataset.claims:
+    for case in cases:
         doc_id = ids[case.file] if case.file else None
-        predicted = verify_claim(retriever, settings, case.claim, doc_id).verdict
+        result = verify_claim(retriever, settings, case.claim, doc_id, nli=nli)
+        if nli is not None and result.judged_by == "heuristic":
+            raise SystemExit("NLI model unavailable; see the warning above.")
+        predicted = result.verdict
         matrix[case.verdict, predicted] += 1
         tally = by_category.setdefault(case.category, [0, 0])
-        tally[0] += predicted == case.verdict
+        tally[0] += _correct(case.verdict, predicted)
         tally[1] += 1
-    correct = sum(matrix[verdict, verdict] for verdict in Verdict)
-    print(f"Claim accuracy: {correct}/{len(dataset.claims)} ({correct / len(dataset.claims):.3f})")
+    correct = sum(hits for hits, _ in by_category.values())
+    print(f"Claim accuracy: {correct}/{len(cases)} ({correct / len(cases):.3f})")
     print(f"{'Category':<18} {'Correct':>8}")
     for category, (hits, total) in by_category.items():
         print(f"{category:<18} {f'{hits}/{total}':>8}")

@@ -35,7 +35,9 @@ class FastEmbedder:
                 if self._model is None:
                     from fastembed import TextEmbedding
 
-                    self._model = TextEmbedding(self.name, cache_dir=str(self.cache_dir), threads=2)
+                    self._model = TextEmbedding(
+                        self.name, cache_dir=str(self.cache_dir), threads=None
+                    )
                 vectors = (
                     self._model.query_embed(texts) if query else self._model.passage_embed(texts)
                 )
@@ -63,7 +65,7 @@ class FastReranker:
                     from fastembed.rerank.cross_encoder import TextCrossEncoder
 
                     self._model = TextCrossEncoder(
-                        self.name, cache_dir=str(self.cache_dir), threads=2
+                        self.name, cache_dir=str(self.cache_dir), threads=None
                     )
                 return [float(score) for score in self._model.rerank(query, texts)]
             except Exception as exc:
