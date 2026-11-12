@@ -1,0 +1,64 @@
+{
+  "corpus": "../examples/corpus",
+  "files": [
+    "ferry-pilot.md", "library-network.md", "shoreline-field-log.md", "水厂试点.md",
+    "储能维护.md", "温室记录.md", "repair-workshop.md", "冷库交接.md"
+  ],
+  "retrieval": [
+    {"query": "harbor ferry operating costs", "relevant": [{"file": "ferry-pilot.md", "contains": "reduced operating costs by 12%"}]},
+    {"query": "When does bad weather stop the boats?", "relevant": [{"file": "ferry-pilot.md", "contains": "winds exceed 32 knots"}]},
+    {"query": "Where can I retrieve a hold after work?", "relevant": [{"file": "library-network.md", "contains": "until 21:00 at the Riverside Branch"}]},
+    {"query": "interlibrary renewals and lending limits", "relevant": [{"file": "library-network.md", "contains": "allows two renewals"}]},
+    {"query": "shoreline plots surveyed in April", "relevant": [{"file": "shoreline-field-log.md", "contains": "inspected 18 shoreline plots"}]},
+    {"query": "Where are images from the field survey kept?", "relevant": [{"file": "shoreline-field-log.md", "contains": "stored on the field station's archival drive"}]},
+    {"query": "青岚试点的单位产水能耗降低多少", "relevant": [{"file": "水厂试点.md", "contains": "单位产水能耗降低了 8.5%"}]},
+    {"query": "维修设备之前要先断掉哪路供电", "relevant": [{"file": "水厂试点.md", "contains": "断开进水泵电源"}]},
+    {"query": "低温下电池什么时候不能快充", "relevant": [{"file": "储能维护.md", "contains": "系统禁止快速充电"}]},
+    {"query": "苗床的人工授粉是在哪几天", "relevant": [{"file": "温室记录.md", "contains": "每周二和周五进行人工授粉"}]},
+    {"query": "community workshop repair bookings per session", "relevant": [{"file": "repair-workshop.md", "contains": "six bookings per session"}]},
+    {"query": "测温设备的检定频率", "relevant": [{"file": "冷库交接.md", "contains": "温度探头每半年校准一次"}]}
+  ],
+  "claims": [
+    {"category": "verbatim", "claim": "The pilot reduced operating costs by 12%.", "file": "ferry-pilot.md", "verdict": "SUPPORTED"},
+    {"category": "verbatim", "claim": "The lockers use a six-digit pickup code that expires after 72 hours.", "file": "library-network.md", "verdict": "SUPPORTED"},
+    {"category": "verbatim", "claim": "试点将单位产水能耗降低了 8.5%。", "file": "水厂试点.md", "verdict": "SUPPORTED"},
+    {"category": "verbatim", "claim": "营养液每天更换一次。", "file": "温室记录.md", "verdict": "SUPPORTED"},
+    {"category": "verbatim", "claim": "The team inspected 18 shoreline plots in April 2025.", "file": "shoreline-field-log.md", "verdict": "SUPPORTED"},
+    {"category": "verbatim", "claim": "温度探头每半年校准一次。", "verdict": "SUPPORTED"},
+
+    {"category": "excerpt", "claim": "The Harbor Ferry pilot recorded 480 boardings.", "file": "ferry-pilot.md", "verdict": "SUPPORTED"},
+    {"category": "excerpt", "claim": "The lockers use a six-digit pickup code.", "file": "library-network.md", "verdict": "SUPPORTED"},
+    {"category": "excerpt", "claim": "共采集 36 份出厂水样。", "file": "水厂试点.md", "verdict": "SUPPORTED"},
+    {"category": "excerpt", "claim": "The pilot reduced operating costs by 12 percent.", "file": "ferry-pilot.md", "verdict": "SUPPORTED"},
+    {"category": "excerpt", "claim": "试点将单位产水能耗降低了百分之 8.5。", "file": "水厂试点.md", "verdict": "SUPPORTED"},
+
+    {"category": "paraphrase", "claim": "Operating costs fell by 12% during the Harbor Ferry pilot.", "file": "ferry-pilot.md", "verdict": "SUPPORTED"},
+    {"category": "paraphrase", "claim": "Sailings stop when sustained winds go above 32 knots.", "file": "ferry-pilot.md", "verdict": "SUPPORTED"},
+    {"category": "paraphrase", "claim": "Pickup codes for the lockers have six digits and last 72 hours.", "file": "library-network.md", "verdict": "SUPPORTED"},
+    {"category": "paraphrase", "claim": "青岚试点让单位产水能耗下降了 8.5%。", "file": "水厂试点.md", "verdict": "SUPPORTED"},
+    {"category": "paraphrase", "claim": "温度探头每六个月校准一次。", "verdict": "SUPPORTED"},
+    {"category": "paraphrase", "claim": "人工授粉安排在每周二和周五。", "file": "温室记录.md", "verdict": "SUPPORTED"},
+
+    {"category": "number_tampered", "claim": "The pilot reduced operating costs by 21%.", "file": "ferry-pilot.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "number_tampered", "claim": "The lockers use a six-digit pickup code that expires after 24 hours.", "file": "library-network.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "number_tampered", "claim": "试点将单位产水能耗降低了 18.5%。", "file": "水厂试点.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "number_tampered", "claim": "The team inspected 18 shoreline plots in April 2024.", "file": "shoreline-field-log.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "number_tampered", "claim": "控制台告警记录保留 30 天。", "file": "水厂试点.md", "verdict": "PARTIALLY_SUPPORTED"},
+
+    {"category": "negation", "claim": "Field volunteers removed samples from the plots.", "file": "shoreline-field-log.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "negation", "claim": "检修前不必断开进水泵电源。", "file": "水厂试点.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "negation", "claim": "Walk-ins are not admitted when a workbench is available.", "file": "repair-workshop.md", "verdict": "PARTIALLY_SUPPORTED"},
+
+    {"category": "entity_swap", "claim": "值班人员每天导出一次逆变器日志。", "file": "储能维护.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "entity_swap", "claim": "Readers can collect reserved books until 21:00 at the Harbor Branch.", "file": "library-network.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "entity_swap", "claim": "备用泵每周五进行空载测试。", "file": "水厂试点.md", "verdict": "PARTIALLY_SUPPORTED"},
+
+    {"category": "qualifier", "claim": "Volunteers accept six bookings per session.", "file": "repair-workshop.md", "verdict": "PARTIALLY_SUPPORTED"},
+    {"category": "qualifier", "claim": "试点预计将单位产水能耗降低 8.5%。", "file": "水厂试点.md", "verdict": "PARTIALLY_SUPPORTED"},
+
+    {"category": "unsupported", "claim": "工作人员在温室屋顶安装了 12 台摄像机。", "file": "温室记录.md", "verdict": "NOT_FOUND"},
+    {"category": "unsupported", "claim": "The train station received a platinum award.", "verdict": "NOT_FOUND"},
+    {"category": "unsupported", "claim": "储能站配备了三台柴油发电机。", "verdict": "NOT_FOUND"},
+    {"category": "unsupported", "claim": "The ferry carries bicycles for free on weekends.", "verdict": "NOT_FOUND"}
+  ]
+}
